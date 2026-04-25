@@ -837,6 +837,7 @@ void DisplayServerAppleEmbedded::_update_hdr_output(bool edr_headroom_changed) {
 
 	float reference_luminance = _calculate_current_reference_luminance();
 	rendering_context->window_set_hdr_output_reference_luminance(DisplayServerEnums::MAIN_WINDOW_ID, reference_luminance);
+	rendering_context->window_set_hdr_output_linear_luminance_scale(DisplayServerEnums::MAIN_WINDOW_ID, reference_luminance);
 
 	float max_luminance = _screen_potential_edr_headroom() * hardware_reference_luminance_nits;
 	rendering_context->window_set_hdr_output_max_luminance(DisplayServerEnums::MAIN_WINDOW_ID, max_luminance);
@@ -852,18 +853,32 @@ void DisplayServerAppleEmbedded::current_edr_headroom_changed() {
 }
 
 bool DisplayServerAppleEmbedded::window_is_hdr_output_supported(DisplayServerEnums::WindowID p_window) const {
+	bool renderer_supports_hdr_output = false;
 #if defined(RD_ENABLED)
-	if (rendering_device && !rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT)) {
-		return false;
+	if (rendering_device && rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT)) {
+		renderer_supports_hdr_output = true;
 	}
 #endif
+	if (!renderer_supports_hdr_output) {
+		return false;
+	}
+
 	return _screen_hdr_is_supported();
 }
 
 void DisplayServerAppleEmbedded::window_request_hdr_output(const bool p_enabled, DisplayServerEnums::WindowID p_window) {
+	if (p_enabled) {
+		bool renderer_supports_hdr_output = false;
 #if defined(RD_ENABLED)
-	ERR_FAIL_COND_MSG(p_enabled && rendering_device && !rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT), "HDR output is not supported by the rendering device.");
+		if (rendering_device && rendering_device->has_feature(RenderingDevice::Features::SUPPORTS_HDR_OUTPUT)) {
+			renderer_supports_hdr_output = true;
+		}
 #endif
+		if (!renderer_supports_hdr_output) {
+			WARN_PRINT("HDR output requested, but is not supported by the renderer or rendering device driver.");
+			return;
+		}
+	}
 
 	edr_requested = p_enabled;
 	_update_hdr_output(false);

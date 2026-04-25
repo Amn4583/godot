@@ -294,6 +294,7 @@ void EditorSceneTabs::update_scene_tabs() {
 
 void EditorSceneTabs::_update_tab_titles() {
 	bool show_rb = EDITOR_GET("interface/scene_tabs/show_script_button");
+	const String main_scene_path = ResourceUID::ensure_path(GLOBAL_GET("application/run/main_scene"));
 
 	// Get all scene names, which may be ambiguous.
 	Vector<String> disambiguated_scene_names;
@@ -315,6 +316,18 @@ void EditorSceneTabs::_update_tab_titles() {
 
 		bool unsaved = EditorUndoRedoManager::get_singleton()->is_history_unsaved(EditorNode::get_editor_data().get_scene_history_id(i));
 		scene_tabs->set_tab_title(i, disambiguated_scene_names[i] + (unsaved ? "(*)" : ""));
+
+		if (!main_scene_path.is_empty() && main_scene_path == EditorNode::get_editor_data().get_scene_path(i)) {
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_DISABLED, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)) * Color(1, 1, 1, 0.7));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_NORMAL, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)) * Color(1, 1, 1, 0.7));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_HOVER, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_PRESSED, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)));
+		} else {
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_DISABLED, get_theme_color(SNAME("font_disabled_color"), SNAME("TabBar")));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_NORMAL, get_theme_color(SNAME("font_unselected_color"), SNAME("TabBar")));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_HOVER, get_theme_color(SNAME("font_hovered_color"), SNAME("TabBar")));
+			scene_tabs->set_font_color_override(i, TabBar::DRAW_PRESSED, get_theme_color(SNAME("font_selected_color"), SNAME("TabBar")));
+		}
 
 		if (NativeMenu::get_singleton()->has_feature(NativeMenu::FEATURE_GLOBAL_MENU)) {
 			RID dock_rid = NativeMenu::get_singleton()->get_system_menu(NativeMenu::DOCK_MENU_ID);
@@ -425,6 +438,12 @@ int EditorSceneTabs::get_current_tab() const {
 	return scene_tabs->get_current_tab();
 }
 
+void EditorSceneTabs::_project_settings_changed() {
+	if (ProjectSettings::get_singleton()->check_changed_settings_in_group("application/run/main_scene")) {
+		update_scene_tabs();
+	}
+}
+
 void EditorSceneTabs::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("tab_changed", PropertyInfo(Variant::INT, "tab_index")));
 	ADD_SIGNAL(MethodInfo("tab_closed", PropertyInfo(Variant::INT, "tab_index")));
@@ -481,6 +500,7 @@ EditorSceneTabs::EditorSceneTabs() {
 	scene_list->set_accessibility_name(TTRC("Show Opened Scenes List"));
 	scene_list->set_shortcut(ED_SHORTCUT("editor/show_opened_scenes_list", TTRC("Show Opened Scenes List"), KeyModifierMask::ALT | Key::T));
 	scene_list->get_popup()->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+	scene_list->get_popup()->set_search_bar_enabled_on_item_count(10);
 	scene_list->get_popup()->connect("about_to_popup", callable_mp(this, &EditorSceneTabs::_update_scene_list));
 	scene_list->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &EditorSceneTabs::_scene_tab_changed));
 	tabbar_container->add_child(scene_list);
@@ -502,4 +522,6 @@ EditorSceneTabs::EditorSceneTabs() {
 	tab_preview->set_size(Size2(96, 96) * EDSCALE);
 	tab_preview->set_position(Point2(2, 2) * EDSCALE);
 	tab_preview_panel->add_child(tab_preview);
+
+	ProjectSettings::get_singleton()->connect("settings_changed", callable_mp(this, &EditorSceneTabs::_project_settings_changed));
 }

@@ -107,12 +107,21 @@ AnimationNode::NodeTimeInfo AnimationNodeAnimation::_process(ProcessState &p_pro
 	double anim_size = anim->get_length();
 
 	double cur_len;
+	double playback_end;
 	Animation::LoopMode cur_loop_mode;
 	if (use_custom_timeline) {
 		cur_len = timeline_length;
+		if (stretch_time_scale) {
+			// When time scale is stretched, the entire animation is played anyway using a time scale based on the timeline length.
+			// Therefore, the end of the animation section is the animation length.
+			playback_end = anim_size;
+		} else {
+			playback_end = timeline_length;
+		}
 		cur_loop_mode = loop_mode;
 	} else {
 		cur_len = anim_size;
+		playback_end = anim_size;
 		cur_loop_mode = anim->get_loop_mode();
 	}
 
@@ -244,7 +253,7 @@ AnimationNode::NodeTimeInfo AnimationNodeAnimation::_process(ProcessState &p_pro
 		if (immediately_after_start) {
 			AnimationMixer::PlaybackInfo pi = p_playback_info;
 			pi.start = 0.0;
-			pi.end = cur_len;
+			pi.end = playback_end;
 			if (play_mode == PLAY_MODE_FORWARD) {
 				pi.time = 0;
 			} else {
@@ -257,7 +266,7 @@ AnimationNode::NodeTimeInfo AnimationNodeAnimation::_process(ProcessState &p_pro
 
 		AnimationMixer::PlaybackInfo pi = p_playback_info;
 		pi.start = 0.0;
-		pi.end = cur_len;
+		pi.end = playback_end;
 		if (play_mode == PLAY_MODE_FORWARD) {
 			pi.time = cur_playback_time;
 		} else {
@@ -1900,7 +1909,7 @@ void AnimationNodeBlendTree::_bind_methods() {
 	BIND_CONSTANT(CONNECTION_ERROR_SAME_NODE);
 	BIND_CONSTANT(CONNECTION_ERROR_CONNECTION_EXISTS);
 
-	ADD_SIGNAL(MethodInfo(SNAME("node_changed"), PropertyInfo(Variant::STRING_NAME, "node_name")));
+	ADD_SIGNAL(MethodInfo("node_changed", PropertyInfo(Variant::STRING_NAME, "node_name")));
 }
 
 void AnimationNodeBlendTree::_initialize_node_tree() {

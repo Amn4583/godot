@@ -319,6 +319,13 @@ struct TextEdit {
 	 * empty string.
 	 */
 	String newText;
+
+	_FORCE_INLINE_ Dictionary to_json() const {
+		Dictionary dict;
+		dict["newText"] = newText;
+		dict["range"] = range.to_json();
+		return dict;
+	}
 };
 
 /**
@@ -1076,6 +1083,12 @@ struct CompletionItem {
 		if (!insertText.is_empty()) {
 			dict["insertText"] = insertText;
 		}
+		if (insertTextFormat) {
+			dict["insertTextFormat"] = insertTextFormat;
+		}
+		if (!textEdit.newText.is_empty()) {
+			dict["textEdit"] = textEdit.to_json();
+		}
 		if (resolved) {
 			if (!detail.is_empty()) {
 				dict["detail"] = detail;
@@ -1135,6 +1148,7 @@ struct CompletionItem {
 		if (p_dict.has("insertText")) {
 			insertText = p_dict["insertText"];
 		}
+		insertTextFormat = p_dict.get("insertTextFormat", 0);
 		if (p_dict.has("data")) {
 			data = p_dict["data"];
 		}

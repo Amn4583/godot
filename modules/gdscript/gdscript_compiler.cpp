@@ -2510,15 +2510,8 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 	}
 
 	if (p_func) {
-		// If no `return` statement, then return type is `void`, not `Variant`.
-		if (p_func->body->has_return) {
-			gd_function->return_type = _gdtype_from_datatype(p_func->get_datatype(), p_script);
-			method_info.return_val = p_func->get_datatype().to_property_info(String());
-		} else {
-			gd_function->return_type = GDScriptDataType();
-			gd_function->return_type.kind = GDScriptDataType::BUILTIN;
-			gd_function->return_type.builtin_type = Variant::NIL;
-		}
+		gd_function->return_type = _gdtype_from_datatype(p_func->get_datatype(), p_script);
+		method_info.return_val = p_func->get_datatype().to_property_info(String());
 
 		if (p_func->is_vararg()) {
 			gd_function->_vararg_index = vararg_addr.address;
@@ -3075,45 +3068,8 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 	//validate instances if keeping state
 
 	if (p_keep_state) {
-		for (RBSet<Object *>::Element *E = p_script->instances.front(); E;) {
-			RBSet<Object *>::Element *N = E->next();
-
-			ScriptInstance *si = E->get()->get_script_instance();
-			if (si->is_placeholder()) {
-#ifdef TOOLS_ENABLED
-				PlaceHolderScriptInstance *psi = static_cast<PlaceHolderScriptInstance *>(si);
-
-				if (p_script->is_tool()) {
-					//re-create as an instance
-					p_script->placeholders.erase(psi); //remove placeholder
-
-					GDScriptInstance *instance = memnew(GDScriptInstance);
-					instance->members.resize(p_script->member_indices.size());
-					instance->script = Ref<GDScript>(p_script);
-					instance->owner = E->get();
-
-					//needed for hot reloading
-					for (const KeyValue<StringName, GDScript::MemberInfo> &F : p_script->member_indices) {
-						instance->member_indices_cache[F.key] = F.value.index;
-					}
-					instance->owner->set_script_instance(instance);
-
-					/* STEP 2, INITIALIZE AND CONSTRUCT */
-
-					Callable::CallError ce;
-					p_script->initializer->call(instance, nullptr, 0, ce);
-
-					if (ce.error != Callable::CallError::CALL_OK) {
-						//well, tough luck, not gonna do anything here
-					}
-				}
-#endif // TOOLS_ENABLED
-			} else {
-				GDScriptInstance *gi = static_cast<GDScriptInstance *>(si);
-				gi->reload_members();
-			}
-
-			E = N;
+		for (SelfList<GDScriptInstance> *E = p_script->instances.first(); E; E = E->next()) {
+			E->self()->reload_members();
 		}
 	}
 #endif //DEBUG_ENABLED

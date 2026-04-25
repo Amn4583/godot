@@ -142,7 +142,7 @@
 #include "editor/settings/editor_settings_dialog.h"
 #include "editor/settings/project_settings_editor.h"
 #include "editor/shader/editor_native_shader_source_visualizer.h"
-#include "editor/shader/visual_shader_editor_plugin.h"
+#include "editor/shader/text_shader_editor.h"
 #include "editor/themes/editor_color_map.h"
 #include "editor/themes/editor_scale.h"
 #include "editor/themes/editor_theme_manager.h"
@@ -173,6 +173,7 @@
 #include "scene/resources/packed_scene.h"
 #include "scene/resources/portable_compressed_texture.h"
 #include "scene/theme/theme_db.h"
+#include "servers/audio/audio_server.h"
 #include "servers/display/display_server.h"
 #include "servers/navigation_2d/navigation_server_2d.h"
 #include "servers/navigation_3d/navigation_server_3d.h"
@@ -1155,6 +1156,7 @@ void EditorNode::_notification(int p_what) {
 			if (EditorSettings::get_singleton()->check_changed_settings_in_group("interface/editor/appearance")) {
 				_update_update_spinner();
 				_update_main_menu_type();
+				renderer->set_visible(EDITOR_GET("interface/editor/appearance/show_renderer_selector"));
 			}
 			if (EditorSettings::get_singleton()->check_changed_settings_in_group("interface/editor/display")) {
 				_update_vsync_mode();
@@ -4066,7 +4068,10 @@ void EditorNode::_check_system_theme_changed() {
 	}
 
 	if (system_theme_changed) {
+		class_icon_cache.clear();
 		_update_theme();
+		_build_icon_type_cache();
+		recent_scenes->reset_size();
 	} else if (menu_type == MENU_TYPE_GLOBAL && display_server->is_dark_mode_supported() && display_server->is_dark_mode() != last_dark_mode_state) {
 		last_dark_mode_state = display_server->is_dark_mode();
 
@@ -6037,6 +6042,26 @@ String EditorNode::_get_system_info() const {
 	const String processor_name = OS::get_singleton()->get_processor_name();
 	const int processor_count = OS::get_singleton()->get_processor_count();
 
+	const String audio_driver_name = AudioServer::get_singleton()->get_driver_name();
+	const float mix_rate = AudioServer::get_singleton()->get_mix_rate();
+
+	AudioServer::SpeakerMode speaker_mode = AudioServer::get_singleton()->get_speaker_mode();
+	String speaker_mode_string;
+	switch (speaker_mode) {
+		case AudioServer::SpeakerMode::SPEAKER_MODE_STEREO:
+			speaker_mode_string = "Stereo/mono";
+			break;
+		case AudioServer::SpeakerMode::SPEAKER_SURROUND_31:
+			speaker_mode_string = "Surround 3.1";
+			break;
+		case AudioServer::SpeakerMode::SPEAKER_SURROUND_51:
+			speaker_mode_string = "Surround 5.1";
+			break;
+		case AudioServer::SpeakerMode::SPEAKER_SURROUND_71:
+			speaker_mode_string = "Surround 7.1";
+			break;
+	}
+
 	// Prettify
 	if (rendering_method == "forward_plus") {
 		rendering_method = "Forward+";
@@ -6118,6 +6143,8 @@ String EditorNode::_get_system_info() const {
 		// If the memory info is available, display it.
 		info.push_back(vformat("%s memory", String::humanize_size(system_ram)));
 	}
+
+	info.push_back(vformat("%s (%d Hz, %s)", audio_driver_name, int(mix_rate), speaker_mode_string));
 
 	return String(" - ").join(info);
 }
@@ -6361,11 +6388,21 @@ void EditorNode::_save_window_settings_to_config(Ref<ConfigFile> p_layout, const
 	if (w) {
 		p_layout->set_value(p_section, "screen", w->get_current_screen());
 
+		Size2i win_size = w->get_size();
+
+		if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_SELF_FITTING_WINDOWS)) {
+			// Work around logical size issues with HiDPI on Wayland. See GH-110643.
+			float win_scale = DisplayServer::get_singleton()->window_get_scale(w->get_window_id());
+
+			win_size.width /= win_scale;
+			win_size.height /= win_scale;
+		}
+
 		Window::Mode mode = w->get_mode();
 		switch (mode) {
 			case Window::MODE_WINDOWED:
 				p_layout->set_value(p_section, "mode", "windowed");
-				p_layout->set_value(p_section, "size", w->get_size());
+				p_layout->set_value(p_section, "size", win_size);
 				break;
 			case Window::MODE_FULLSCREEN:
 			case Window::MODE_EXCLUSIVE_FULLSCREEN:
@@ -7466,6 +7503,7 @@ void EditorNode::reload_instances_with_path_in_edited_scenes() {
 
 			// Replace the original node with the instantiated version.
 			original_node->replace_by(instantiated_node, false);
+			instantiated_node->set_unique_scene_id(original_node->get_unique_scene_id());
 
 			// Mark the old node for deletion.
 			original_node->queue_free();
@@ -7835,6 +7873,8 @@ void EditorNode::_feature_profile_changed() {
 			editor_main_screen->set_button_enabled(EditorMainScreen::EDITOR_ASSETLIB, true);
 		}
 	}
+
+	editor_dock_manager->update_docks_menu();
 }
 
 void EditorNode::_bind_methods() {
@@ -8294,8 +8334,11 @@ void EditorNode::notify_settings_overrides_changed() {
 // to cover the command line workflow of creating projects using `touch project.godot`.
 //
 // This is used to set better defaults for new projects without affecting existing projects.
+// Keep the list alphabetically sorted.
 HashMap<String, Variant> EditorNode::get_initial_settings() {
 	HashMap<String, Variant> settings;
+	settings["display/window/stretch/aspect"] = "expand";
+	settings["display/window/stretch/mode"] = "canvas_items";
 	settings["physics/3d/physics_engine"] = "Jolt Physics";
 	settings["rendering/rendering_device/driver.windows"] = "d3d12";
 	return settings;
@@ -8527,6 +8570,12 @@ EditorNode::EditorNode() {
 		import_model_as_animation.instantiate("AnimationLibrary");
 		ResourceFormatImporter::get_singleton()->add_importer(import_model_as_animation);
 
+		Ref<ResourceImporterScene> import_scene_as_mesh_library = memnew(ResourceImporterScene("MeshLibrary"));
+		ResourceFormatImporter::get_singleton()->add_importer(import_scene_as_mesh_library);
+
+		Ref<ResourceImporterScene> import_scene_as_single_mesh = memnew(ResourceImporterScene("ArrayMesh"));
+		ResourceFormatImporter::get_singleton()->add_importer(import_scene_as_single_mesh);
+
 		{
 			Ref<EditorSceneFormatImporterCollada> import_collada;
 			import_collada.instantiate();
@@ -8554,10 +8603,6 @@ EditorNode::EditorNode() {
 		Ref<EditorInspectorRootMotionPlugin> rmp;
 		rmp.instantiate();
 		EditorInspector::add_inspector_plugin(rmp);
-
-		Ref<EditorInspectorVisualShaderModePlugin> smp;
-		smp.instantiate();
-		EditorInspector::add_inspector_plugin(smp);
 
 		Ref<EditorInspectorParticleProcessMaterialPlugin> ppm;
 		ppm.instantiate();
@@ -8945,7 +8990,7 @@ EditorNode::EditorNode() {
 	ED_SHORTCUT_AND_COMMAND("editor/editor_3d", TTRC("Open 3D Workspace"), KeyModifierMask::CTRL | Key::F2);
 	ED_SHORTCUT_AND_COMMAND("editor/editor_script", TTRC("Open Script Editor"), KeyModifierMask::CTRL | Key::F3);
 	ED_SHORTCUT_AND_COMMAND("editor/editor_game", TTRC("Open Game View"), KeyModifierMask::CTRL | Key::F4);
-	ED_SHORTCUT_AND_COMMAND("editor/editor_assetlib", TTRC("Open Asset Library"), KeyModifierMask::CTRL | Key::F5);
+	ED_SHORTCUT_AND_COMMAND("editor/editor_assetlib", TTRC("Open Asset Store"), KeyModifierMask::CTRL | Key::F5);
 
 	ED_SHORTCUT_OVERRIDE("editor/editor_2d", "macos", KeyModifierMask::META | KeyModifierMask::CTRL | Key::KEY_1);
 	ED_SHORTCUT_OVERRIDE("editor/editor_3d", "macos", KeyModifierMask::META | KeyModifierMask::CTRL | Key::KEY_2);
@@ -9041,7 +9086,6 @@ EditorNode::EditorNode() {
 	title_bar->add_child(right_menu_hb);
 
 	renderer = memnew(OptionButton);
-	renderer->set_visible(true);
 	renderer->set_flat(true);
 	renderer->set_theme_type_variation("TopBarOptionButton");
 	renderer->set_fit_to_longest_item(false);
@@ -9086,6 +9130,8 @@ EditorNode::EditorNode() {
 		renderer->set_item_metadata(-1, current_renderer_os);
 	}
 	_update_renderer_color();
+
+	renderer->set_visible(EDITOR_GET("interface/editor/appearance/show_renderer_selector"));
 
 	progress_hb = memnew(BackgroundProgress);
 
@@ -9344,11 +9390,12 @@ EditorNode::EditorNode() {
 
 	ScriptTextEditor::register_editor(); // Register one for text scripts.
 	TextEditor::register_editor();
+	TextShaderEditor::register_editor();
 
 	if (AssetLibraryEditorPlugin::is_available()) {
 		add_editor_plugin(memnew(AssetLibraryEditorPlugin));
 	} else {
-		print_verbose("Asset Library not available (due to using Web editor, or SSL support disabled).");
+		print_verbose("Asset Store not available (due to using Web editor, or SSL support disabled).");
 	}
 
 	// More visually meaningful to have this later.
@@ -9421,10 +9468,6 @@ EditorNode::EditorNode() {
 		Ref<FogMaterialConversionPlugin> fog_mat_convert;
 		fog_mat_convert.instantiate();
 		resource_conversion_plugins.push_back(fog_mat_convert);
-
-		Ref<VisualShaderConversionPlugin> vshader_convert;
-		vshader_convert.instantiate();
-		resource_conversion_plugins.push_back(vshader_convert);
 	}
 
 	update_spinner_step_msec = OS::get_singleton()->get_ticks_msec();

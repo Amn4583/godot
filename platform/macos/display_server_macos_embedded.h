@@ -35,10 +35,11 @@
 @class CAContext;
 @class CALayer;
 class InputEvent;
-class GLManagerEmbedded;
 class NativeMenu;
-class RenderingContextDriver;
-class RenderingDevice;
+
+#ifdef GLES3_ENABLED
+class GLManagerEmbedded;
+#endif
 
 struct DisplayServerMacOSEmbeddedState {
 	/*! Default to a scale of 2.0, which is the most common. */
@@ -96,6 +97,10 @@ class DisplayServerMacOSEmbedded : public DisplayServerMacOSBase {
 	const HDROutput &_get_hdr_output(DisplayServerEnums::WindowID p_window) const override;
 
 	Point2i ime_last_position;
+
+	// Convert source pixel size to render pixel size, accounting for the
+	// difference between display scale and render scale when hiDPI is disabled.
+	Size2i _source_to_render_size(const Size2i &p_source_size) const;
 
 	void _mouse_apply_mode(DisplayServerEnums::MouseMode p_prev_mode, DisplayServerEnums::MouseMode p_new_mode) override;
 
