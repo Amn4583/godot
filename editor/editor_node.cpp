@@ -1041,6 +1041,14 @@ void EditorNode::_notification(int p_what) {
 			if (Engine::get_singleton()->is_recovery_mode_hint()) {
 				EditorToaster::get_singleton()->popup_str(TTR("Recovery Mode is enabled. Editor functionality has been restricted."), EditorToaster::SEVERITY_WARNING);
 			}
+			
+#ifdef ANDROID_ENABLED
+			float scale = EditorScale::get_scale();
+            float screen_width = DisplayServer::get_singleton()->screen_get_size().x;
+            if (scale * 1024.0 > screen_width) {
+                EditorToaster::get_singleton()->popup_str(TTR("The selected display scale may cause the editor UI to overflow the screen on this device. Consider using a lower scale."), EditorToaster::SEVERITY_WARNING);
+            }
+#endif
 
 			/* DO NOT LOAD SCENES HERE, WAIT FOR FILE SCANNING AND REIMPORT TO COMPLETE */
 		} break;
